@@ -90,6 +90,7 @@ class ReshapedTensor:
         self.tensor = tensor
         self.orig_shape = tensor.shape[1:]
         self.new_shape = None
+        self.scale = 1
 
     def reshape(self, new_shape):
         self.new_shape = new_shape
