@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-
+# todo: 编写说明文档
 # 可变尺寸3D张量，在改变尺寸后提供恢复原始尺寸的功能
 class ReshapedTensor3D:
     def __init__(self, tensor):

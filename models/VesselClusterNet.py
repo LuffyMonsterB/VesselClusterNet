@@ -6,19 +6,7 @@ from monai.networks.blocks.transformerblock import TransformerBlock
 import random
 import monai.transforms as transforms
 import math
-
-class MLP(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, dropout):
-        super().__init__()
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        x = F.gelu(self.fc1(x))
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
+from SegResNet3D import SegResNet
 
 
 class PatchEmbeddingBlock(nn.Module):
@@ -84,59 +72,72 @@ class ViT(nn.Module):
         # X: [B Patch C]
         return x, hidden_states_out
 
-# todo 修改为填充+缩放的方式
-class ReshapedTensor:
-    def __init__(self, tensor):
-        self.tensor = tensor
-        self.orig_shape = tensor.shape[1:]
-        self.new_shape = None
 
-    def reshape(self, new_shape):
-        self.new_shape = new_shape
-        resize = transforms.Resize(new_shape)
-        self.tensor = resize(self.tensor)
-        return self.tensor
+def fea_to_binary(fea_list):
+    threshold = 0.5
+    map_list = []
+    for fea in fea_list:
+        map_output = F.sigmoid(fea)
+        binary_output = torch.zeros_like(map_output)
+        binary_output[map_output > threshold] = 1
+        map_list.append(binary_output)
+    return map_list
 
-    def restore_orig_shape(self):
-        c = self.tensor.shape[0]
-        orig_shape = (c,) + self.orig_shape
-        self.tensor = self.resize(orig_shape)(self.tensor)
-        return self.tensor
 
-    def restore_new_shape(self):
-        c = self.tensor.shape[0]
-        new_shape = (c,) + self.new_shape
-        resize = transforms.Resize(new_shape)
-        self.tensor = resize(self.tensor)
-        return self.tensor
+class VesselClusterNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.img_net = SegResNet(
+            blocks_down=[1, 2, 2, 4],
+            blocks_up=[1, 1, 1],
+            init_filters=16,
+            in_channels=1,
+            out_channels=1,
+            dropout_prob=0.1,
+        )
 
-    def set_tensor(self, new_tensor):
-        self.tensor = new_tensor
-        return True
+    def forward(self, x):
+        coarse_output = self.img_net(x)
+
+        coarse_seg = coarse_output['output']
+        down_fea = coarse_output["down_fea"]
+        up_outputs = coarse_output["up_outputs"]
+
+        up_outputs = fea_to_binary(up_outputs)
+
+        return coarse_seg, down_fea, up_outputs
 
 
 if __name__ == '__main__':
-    img_size = (32, 32, 32)
-    patch_size = 4
-    vit = ViT(image_size=32, patch_size=4, in_channels=1, emb_dim=64, depth=4, heads=8, mlp_dim=256)
-    num = 10
-    datas = []
-    inputs = []
-    for i in range(num):
-        data = torch.randn(1, random.randint(16, 48), random.randint(16, 48), random.randint(16, 48))
-        tensor = ReshapedTensor(data)
-        reshaped_tensor = tensor.reshape(img_size)
-        datas.append(tensor)
-        inputs.append(reshaped_tensor)
-    inputs = torch.stack(inputs)
-    outputs = vit(inputs)[0]
+    vessel_cluster_net = VesselClusterNet()
+    data = torch.randn(2, 1, 96, 96, 96)
+    coarse_seg, down_fea, up_outputs = vessel_cluster_net(data)
+    print(coarse_seg.shape, down_fea, up_fea)
 
-    outputs = outputs.detach().tolist()
-
-    for i in range(len(outputs)):
-        new_tensor = torch.tensor(outputs[i]).transpose(-1, -2).reshape(-1,img_size[0]//patch_size,img_size[1]//patch_size,img_size[2]//patch_size)
-        datas[i].set_tensor(new_tensor)
-        datas[i].restore_new_shape()
-        datas[i].restore_orig_shape()
-
-    print(datas)
+# if __name__ == '__main__':
+#     img_size = (32, 32, 32)
+#     patch_size = 4
+#     vit = ViT(image_size=32, patch_size=4, in_channels=1, emb_dim=64, depth=4, heads=8, mlp_dim=256)
+#     num = 10
+#     datas = []
+#     inputs = []
+#     for i in range(num):
+#         data = torch.randn(1, random.randint(16, 48), random.randint(16, 48), random.randint(16, 48))
+#         tensor = ReshapedTensor(data)
+#         reshaped_tensor = tensor.reshape(img_size)
+#         datas.append(tensor)
+#         inputs.append(reshaped_tensor)
+#     inputs = torch.stack(inputs)
+#     outputs = vit(inputs)[0]
+#
+#     outputs = outputs.detach().tolist()
+#
+#     for i in range(len(outputs)):
+#         new_tensor = torch.tensor(outputs[i]).transpose(-1, -2).reshape(-1, img_size[0] // patch_size,
+#                                                                         img_size[1] // patch_size,
+#                                                                         img_size[2] // patch_size)
+#         datas[i].set_tensor(new_tensor)
+#         datas[i].restore_new_shape()
+#         datas[i].restore_orig_shape()
+#
+#     print(datas)
