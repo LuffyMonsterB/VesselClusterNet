@@ -34,16 +34,20 @@ class ReshapedTensor3D:
         self.pad = {"d": pad_d, "h": pad_h, "w": pad_w}
         return self.tensor
 
-    # 接受更新过的tensor，恢复张量尺寸
+    # 接收更新过的tensor，恢复张量尺寸
     def restore(self, updated_tensor=None):
         if updated_tensor is not None:
             self.tensor = updated_tensor
-        # 1. 取消填充 todo
+        # 1. 取消填充
         pad_d, pad_h, pad_w = self.pad['d'], self.pad['h'], self.pad['w']
-
+        new_tensor = self.tensor[:, :, (pad_d // 2):(32 - pad_d // 2), (pad_h // 2):(32 - pad_h // 2), (pad_w // 2):(32 - pad_w // 2)]
+        new_tensor = F.interpolate(new_tensor, self.ori_shape)
+        self.tensor = new_tensor
         return self.tensor
 
 if __name__ == '__main__':
     tensor = ReshapedTensor3D(torch.randn(2, 16, 68, 64, 64))
     reshaped_tensor = tensor.reshape(new_shape=(32, 32, 32))
     restored_tensor = tensor.restore(reshaped_tensor)
+    print(reshaped_tensor.shape)
+    print(restored_tensor.shape)
