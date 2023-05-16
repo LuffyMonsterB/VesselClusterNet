@@ -6,8 +6,10 @@ import monai.transforms as transforms
 import math
 from sklearn.cluster import KMeans
 from SegResNet3D import SegResNet
-from utils import fea_to_binary, make_coord, unmake_coord, min_bounding_box
+from ViT import PatchEmbeddingBlock, ViT
+from utils import fea_to_binary, make_coord, min_bounding_box, ReshapedTensor3D
 import math
+import numpy as np
 
 class VesselClusterNet(nn.Module):
     def __init__(self):
@@ -20,7 +22,8 @@ class VesselClusterNet(nn.Module):
             out_channels=1,
             dropout_prob=0.1,
         )
-
+        self.img_format_size = (32,32,32)
+        self.vit = ViT(image_size=32, patch_size=8, in_channels=16, emb_dim=64, depth=4, heads=8, mlp_dim=256)
     # def _make_vit_layers(self):
     #     vit_layers = nn.ModuleList()
     #     num_layers = 3
@@ -77,18 +80,22 @@ class VesselClusterNet(nn.Module):
             mask = up_outputs[-1].clone()
             fea = down_fea[-1].clone()
             b_patch_feas, b_bounding_boxs = self.gen_patch_by_cluster(fea, mask)
+            b_patch_reshaped_feas = []
+            b_patch_format_feas = []
+            for b in b_patch_feas:
+                reshaped_fea_list = []
+                format_fea_list = []
+                for patch in b:
+                    reshaped_fea = ReshapedTensor3D(patch)
+                    reshaped_fea_list.append(reshaped_fea)
+                    format_fea_list.append(reshaped_fea.reshape(self.img_format_size))
+                b_patch_reshaped_feas.append(reshaped_fea_list)
+                b_patch_format_feas.append(torch.stack(format_fea_list))
+            # shape: B Num_patch C D H W
+            format_fea = torch.tensor(torch.stack(b_patch_format_feas))
+        fine_out = self.vit(format_fea)
 
-        return coarse_seg
-
-
-def gen_vit_fea(fea, mask, num_cluster):
-    # 建立标准坐标系
-    coord = make_coord(shape=mask.shape, flatten=False)
-    # 筛选前景区域的坐标
-    coord_nonzero = coord[mask > 0].numpy()
-    kmeans_list = KMeans(n_clusters=num_cluster, max_iter=30).fit(coord_nonzero)
-    center_list = kmeans_list.labels_
-    center_index = np.unique(center_list)
+        return coarse_seg,fine_out
 
 
 if __name__ == '__main__':

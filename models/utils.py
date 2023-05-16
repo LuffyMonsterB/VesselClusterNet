@@ -76,15 +76,6 @@ def make_coord(shape, ranges=None, flatten=True):
         ret = ret.view(-1, ret.shape[-1])
     return ret
 
-def unmake_coord(coord, shape, ranges=None):
-    if ranges is None:
-        ranges = (-1, 1)
-    # coords = coords.view(*shape, -1)
-    v0, v1 = ranges
-    r = (v1 - v0) / (2 * torch.tensor(shape).float())
-    coord = v0 + r + (2 * r) * coord
-    return coord
-
 # 获取外包立方体
 # 未使用旋转卡壳算法，因为只需要水平垂直方向上外包即可
 def min_bounding_box(points):
