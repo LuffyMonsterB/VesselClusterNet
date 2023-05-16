@@ -1,88 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from monai.networks.layers import Conv, trunc_normal_
-from monai.networks.blocks.transformerblock import TransformerBlock
 import random
 import monai.transforms as transforms
 import math
+from sklearn.cluster import KMeans
 from SegResNet3D import SegResNet
-
-
-class PatchEmbeddingBlock(nn.Module):
-    def __init__(self, in_channels: int,
-                 image_size: int,
-                 patch_size: int,
-                 emb_dim: int,
-                 num_heads: int,
-                 dropout_rate: float = 0.0,
-                 spatial_dims: int = 3,
-                 ) -> None:
-        super().__init__()
-        assert image_size % patch_size == 0, 'image size must be divisible by patch size'
-        assert emb_dim % num_heads == 0, 'embedding size should be divisible by num_heads.'
-
-        num_patches = (image_size // patch_size) ** 3
-        patch_dim = in_channels * patch_size ** 3
-        self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches, emb_dim))
-        self.dropout = nn.Dropout(dropout_rate)
-        self.patch_embeddings = nn.Sequential(
-            nn.Conv3d(in_channels, emb_dim, kernel_size=patch_size, stride=patch_size),
-            nn.Flatten(start_dim=2)
-        )
-        trunc_normal_(self.position_embeddings, mean=0.0, std=0.02, a=-2.0, b=2.0)
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, mean=0.0, std=0.02, a=-2.0, b=2.0)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-
-    def forward(self, x):
-        x = self.patch_embeddings(x).transpose(-1, -2)
-        embeddings = x + self.position_embeddings
-        embeddings = self.dropout(embeddings)
-        return embeddings
-
-
-class ViT(nn.Module):
-    def __init__(self, image_size=256, patch_size=8, in_channels=1, emb_dim=64, depth=8, heads=8,
-                 mlp_dim=256, dropout=0.1):
-        super().__init__()
-        self.patch_embedding_block = PatchEmbeddingBlock(in_channels=in_channels, image_size=image_size,
-                                                         patch_size=patch_size, emb_dim=emb_dim, num_heads=heads,
-                                                         dropout_rate=dropout)
-        self.blocks = nn.ModuleList(
-            [TransformerBlock(hidden_size=emb_dim, mlp_dim=mlp_dim, num_heads=heads, dropout_rate=dropout,
-                              qkv_bias=False) for i in range(depth)]
-        )
-        self.norm = nn.LayerNorm(emb_dim)
-
-    def forward(self, x):
-        x = self.patch_embedding_block(x)
-        hidden_states_out = []
-        for blk in self.blocks:
-            x = blk(x)
-            hidden_states_out.append(x)
-        x = self.norm(x)
-        # X: [B Patch C]
-        return x, hidden_states_out
-
-
-def fea_to_binary(fea_list):
-    threshold = 0.5
-    map_list = []
-    for fea in fea_list:
-        map_output = F.sigmoid(fea)
-        binary_output = torch.zeros_like(map_output)
-        binary_output[map_output > threshold] = 1
-        map_list.append(binary_output)
-    return map_list
-
+from utils import fea_to_binary, make_coord, unmake_coord, min_bounding_box
+import math
 
 class VesselClusterNet(nn.Module):
     def __init__(self):
@@ -96,21 +21,79 @@ class VesselClusterNet(nn.Module):
             dropout_prob=0.1,
         )
 
+    # def _make_vit_layers(self):
+    #     vit_layers = nn.ModuleList()
+    #     num_layers = 3
+    #     for i in range(num_layers):
+    #         vit_layers.append(
+    #             ViT(image_size=32, patch_size=4, in_channels=1, emb_dim=64, depth=4, heads=8, mlp_dim=256))
+    #     return vit_layers
+
+    def gen_patch_by_cluster(self, fea, mask, num_cluster=10):
+        b, c, d, h, w = fea.shape
+        b_patch_feas = []
+        # b_cluster_coords = []
+        b_bounding_boxs = []
+        # 建立标准坐标系
+        coord = make_coord(shape=mask.shape[-3:], flatten=False).unsqueeze(0)
+        for i in range(b):
+            # 聚类生成图块, 筛选前景区域的坐标
+            coord_nonzero = coord[mask[i, :, :, :, :] > 0].numpy()
+            kmeans_list = KMeans(n_clusters=num_cluster, max_iter=30).fit(coord_nonzero)
+            label_list = kmeans_list.labels_
+            cluster_list = [[] for _ in range(num_cluster)]
+            # 按簇对点进行分类
+            for idx, label in enumerate(label_list):
+                cluster_list[label].append(coord_nonzero[idx, :])
+            # batch内进行图块抽取
+            bounding_box_list = []
+            patch_fea_list = []
+            for c in range(num_cluster):
+                # 获取外包立方体最小点和最大点下标
+                bounding_box = min_bounding_box(cluster_list[c])
+                truth_max_point = (bounding_box['max_point'] + 1) * (d, h, w) / 2
+                truth_max_point = [math.floor(p) for p in truth_max_point]
+                truth_min_point = (bounding_box['min_point'] + 1) * (d, h, w) / 2
+                truth_min_point = [math.floor(p) for p in truth_min_point]
+                # 抽取语义特征
+                patch_fea_list.append(
+                    fea[i, :, truth_min_point[0]:truth_max_point[0], truth_min_point[1]:truth_max_point[1],
+                    truth_min_point[2]:truth_max_point[2]])
+                bounding_box_list.append({"max_point": truth_max_point, "min_point": truth_min_point})
+
+            # b_cluster_coords.append(cluster_list)
+            b_bounding_boxs.append(bounding_box_list)
+            b_patch_feas.append(patch_fea_list)
+        return b_patch_feas, b_bounding_boxs
+
     def forward(self, x):
         coarse_output = self.img_net(x)
-
         coarse_seg = coarse_output['output']
+
         down_fea = coarse_output["down_fea"]
         up_outputs = coarse_output["up_outputs"]
-
         up_outputs = fea_to_binary(up_outputs)
+        with torch.no_grad():
+            mask = up_outputs[-1].clone()
+            fea = down_fea[-1].clone()
+            b_patch_feas, b_bounding_boxs = self.gen_patch_by_cluster(fea, mask)
 
-        return coarse_seg, down_fea, up_outputs
+        return coarse_seg
+
+
+def gen_vit_fea(fea, mask, num_cluster):
+    # 建立标准坐标系
+    coord = make_coord(shape=mask.shape, flatten=False)
+    # 筛选前景区域的坐标
+    coord_nonzero = coord[mask > 0].numpy()
+    kmeans_list = KMeans(n_clusters=num_cluster, max_iter=30).fit(coord_nonzero)
+    center_list = kmeans_list.labels_
+    center_index = np.unique(center_list)
 
 
 if __name__ == '__main__':
     vessel_cluster_net = VesselClusterNet()
-    data = torch.randn(2, 1, 96, 96, 96)
+    data = torch.randn(2, 1, 32, 64, 64)
     coarse_seg, down_fea, up_outputs = vessel_cluster_net(data)
     print(coarse_seg.shape, down_fea, up_fea)
 

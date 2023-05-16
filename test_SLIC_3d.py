@@ -47,7 +47,7 @@ def visualize(coord, colors):
     plt.show()
 
 # 加载nii为数组
-nii_path = '../Data/Parse22_seg/val/seg/PA000282.nii.gz'
+nii_path = '../Data/Parse22_seg/val/label/PA000282.nii.gz'
 nii_arr = load_data(nii_path)
 nii_arr[nii_arr>0.5]=1
 nii_arr[nii_arr<=0.5]=0
@@ -56,7 +56,7 @@ coord = make_coord(shape=nii_arr.shape, flatten=False)
 # 筛选前景区域的坐标
 coord_nonzero = coord[nii_arr > 0].numpy()
 
-num_cluster = 1
+num_cluster = 10
 kmeans_list = KMeans(n_clusters=num_cluster, max_iter=30).fit(coord_nonzero)
 center_list =kmeans_list.labels_
 center_index = np.unique(center_list)

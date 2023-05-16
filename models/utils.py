@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
+
 
 # todo: 编写说明文档
 # 可变尺寸3D张量，在改变尺寸后提供恢复原始尺寸的功能
@@ -40,10 +42,12 @@ class ReshapedTensor3D:
             self.tensor = updated_tensor
         # 1. 取消填充
         pad_d, pad_h, pad_w = self.pad['d'], self.pad['h'], self.pad['w']
-        new_tensor = self.tensor[:, :, (pad_d // 2):(32 - pad_d // 2), (pad_h // 2):(32 - pad_h // 2), (pad_w // 2):(32 - pad_w // 2)]
+        new_tensor = self.tensor[:, :, (pad_d // 2):(32 - pad_d // 2), (pad_h // 2):(32 - pad_h // 2),
+                     (pad_w // 2):(32 - pad_w // 2)]
         new_tensor = F.interpolate(new_tensor, self.ori_shape)
         self.tensor = new_tensor
         return self.tensor
+
 
 def fea_to_binary(fea_list):
     threshold = 0.5
@@ -54,6 +58,43 @@ def fea_to_binary(fea_list):
         binary_output[map_output > threshold] = 1
         map_list.append(binary_output)
     return map_list
+
+
+def make_coord(shape, ranges=None, flatten=True):
+    coord_seqs = []
+    for i, n in enumerate(shape):
+        if ranges is None:
+            v0, v1 = -1, 1
+        else:
+            # v0, v1 = ranges[i]
+            v0, v1 = ranges
+        r = (v1 - v0) / (2 * n)
+        seq = v0 + r + (2 * r) * torch.arange(n).float()
+        coord_seqs.append(seq)
+    ret = torch.stack(torch.meshgrid(*coord_seqs), dim=-1)
+    if flatten:
+        ret = ret.view(-1, ret.shape[-1])
+    return ret
+
+def unmake_coord(coord, shape, ranges=None):
+    if ranges is None:
+        ranges = (-1, 1)
+    # coords = coords.view(*shape, -1)
+    v0, v1 = ranges
+    r = (v1 - v0) / (2 * torch.tensor(shape).float())
+    coord = v0 + r + (2 * r) * coord
+    return coord
+
+# 获取外包立方体
+# 未使用旋转卡壳算法，因为只需要水平垂直方向上外包即可
+def min_bounding_box(points):
+    points = np.array(points)
+    # 找到最小包围盒的最小点和最大点
+    min_point = np.min(points, axis=0)
+    max_point = np.max(points, axis=0)
+
+    return {"min_point": min_point, "max_point": max_point}
+
 
 if __name__ == '__main__':
     tensor = ReshapedTensor3D(torch.randn(2, 16, 68, 64, 64))
