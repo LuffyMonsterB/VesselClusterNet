@@ -12,7 +12,7 @@ from monai.transforms import AsDiscrete, Compose, EnsureType, Activations
 from monai.utils.enums import MetricReduction
 from monai.losses import DiceCELoss
 from tqdm import tqdm
-from utils.TrainUtils import AverageMeter
+from utils.TrainUtils import AverageMeter, get_label_patch
 from datasets.parse22_vesselClusterNet import get_train_dataloader
 from models.VesselClusterNet import VesselClusterNet
 
@@ -32,7 +32,7 @@ def main():
     learn_rate = 5e-4
     optimizer = torch.optim.Adam(model.parameters(), learn_rate, weight_decay=1e-6)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epoch)
-    save_interval = 30
+    save_interval = 40
     writer = SummaryWriter()
     for epoch in range(num_epoch):
         train_loss = train_epoch(epoch, model, train_dl, optimizer, dice_loss, device)
@@ -54,11 +54,11 @@ def train_epoch(epoch, model, dataloader, optimizer, loss_func, device):
     train_loop = tqdm(enumerate(dataloader), total=len(dataloader))
     train_loop.set_description(f'Epoch {epoch + 1}')
     for idx, batch_data in train_loop:
-        nii, label = batch_data[0].to(device), batch_data[1].to(device)
+        nii, labels = batch_data[0].to(device), batch_data[1].to(device)
         for param in model.parameters():
             param.grad = None
-        output = model(nii)
-        loss = loss_func(output, label)
+        coarse_seg, fine_outs, b_bounding_boxs = model(data)
+        loss = cal_total_loss(loss_func, labels, coarse_seg, fine_outs, b_bounding_boxs)
         loss.backward()
         optimizer.step()
         run_loss.update(loss.item(), n=1)
@@ -66,6 +66,14 @@ def train_epoch(epoch, model, dataloader, optimizer, loss_func, device):
     for param in model.parameters():
         param.grad = None
     return run_loss.avg
+
+
+# 计算总的损失，粗分割+细化输出
+def cal_total_loss(loss_func, labels, coarse_seg, fine_out, b_bounding_boxs):
+    b_label_patches = get_label_patch(labels, b_bounding_boxs)
+    loss1 = loss_func(coarse_seg, labels)
+    loss2 = loss_func(fine_out, b_label_patches)
+    return loss1 + loss2
 
 
 def save_checkpoint(save_dir, model, epoch, optimizer=None, scheduler=None):

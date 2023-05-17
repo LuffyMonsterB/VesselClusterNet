@@ -48,11 +48,12 @@ class PatchEmbeddingBlock(nn.Module):
 
 
 class ViT(nn.Module):
-    def __init__(self, image_size=256, patch_size=8, in_channels=1, emb_dim=64, depth=8, heads=8,
+    def __init__(self, image_size=256, patch_size=8, num_cluster=10, in_channels=1, emb_dim=64, depth=8, heads=8,
                  mlp_dim=256, dropout=0.1):
         super().__init__()
         self.img_size = image_size
         self.patch_size = patch_size
+        self.num_cluster = num_cluster
         self.patch_embedding_block = PatchEmbeddingBlock(in_channels=in_channels, image_size=image_size,
                                                          patch_size=patch_size, emb_dim=emb_dim, num_heads=heads,
                                                          dropout_rate=dropout)
@@ -64,16 +65,19 @@ class ViT(nn.Module):
 
         self.decode_blocks = nn.ModuleList(
             [nn.Sequential(
-                get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** i),
+                get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** i * self.num_cluster),
                 get_act_layer('prelu'),
-                nn.ConvTranspose3d(in_channels=emb_dim // 2 ** i, out_channels=emb_dim // 2 ** (i + 1), kernel_size=2,
+                nn.ConvTranspose3d(in_channels=emb_dim // 2 ** i * self.num_cluster,
+                                   out_channels=emb_dim // 2 ** (i + 1) * self.num_cluster, kernel_size=2,
                                    stride=2)
-            ) for i in range(image_size // patch_size // 2 + 2)],
+            ) for i in range(image_size // patch_size // 2 + 1)],
         )
         self.final_conv = nn.Sequential(
-            get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** (image_size // patch_size // 2 + 2)),
+            get_norm_layer('instance', spatial_dims=3,
+                           channels=emb_dim // 2 ** (image_size // patch_size // 2 + 1) * self.num_cluster),
             get_act_layer('prelu'),
-            nn.Conv3d(emb_dim // 2 ** (image_size // patch_size // 2 + 2), 1, kernel_size=1)
+            nn.Conv3d(emb_dim // 2 ** (image_size // patch_size // 2 + 1) * self.num_cluster, 1 * self.num_cluster,
+                      kernel_size=1)
         )
 
     def forward(self, x):
@@ -91,15 +95,11 @@ class ViT(nn.Module):
         # decoder
         p_size = self.img_size // self.patch_size
         d = h = w = int(np.cbrt(x.shape[1] // num_patch))
-        x = x.reshape(shape=(x.shape[0], num_patch, x.shape[-1], d, h, w))
-        outputs = []
-        for p in range(num_patch):
-            patch_fea = x[:, p, :, :, :, :]
-            for decode_block in self.decode_blocks:
-                patch_fea = decode_block(patch_fea)
-            output = self.final_conv(patch_fea)
-            outputs.append(output)
+        x = x.reshape(shape=(x.shape[0], num_patch * x.shape[-1], d, h, w))
 
+        for decode_block in self.decode_blocks:
+            x = decode_block(x)
+        x = self.final_conv(x)
         # X: [B Patch C]
         # return x, hidden_states_out
-        return outputs
+        return x

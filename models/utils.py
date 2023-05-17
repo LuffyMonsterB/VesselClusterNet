@@ -27,9 +27,9 @@ class ReshapedTensor3D:
         pad_w = (w - new_tensor.shape[-1] % w) if h != new_tensor.shape[-1] else 0
         # F.pad模式可查看：https://zhuanlan.zhihu.com/p/358599463
         # pad = (左边填充数， 右边填充数， 上边填充数， 下边填充数， 前边填充数，后边填充数)
-        new_tensor = F.pad(new_tensor, (pad_w // 2, pad_w // 2 if pad_w % 2 == 0 else pad_w // 2 + 1,
-                                        pad_h // 2, pad_h // 2 if pad_h % 2 == 0 else pad_h // 2 + 1,
-                                        pad_d // 2, pad_d // 2 if pad_d % 2 == 0 else pad_d // 2 + 1))
+        new_tensor = F.pad(new_tensor, (pad_w // 2, (pad_w // 2 if pad_w % 2 == 0 else pad_w // 2 + 1),
+                                        pad_h // 2, (pad_h // 2 if pad_h % 2 == 0 else pad_h // 2 + 1),
+                                        pad_d // 2, (pad_d // 2 if pad_d % 2 == 0 else pad_d // 2 + 1)))
 
         self.tensor = new_tensor
         self.new_shape = new_shape
@@ -41,10 +41,14 @@ class ReshapedTensor3D:
         if updated_tensor is not None:
             self.tensor = updated_tensor
         # 1. 取消填充
+        ori_d, ori_h, ori_w = self.ori_shape
         pad_d, pad_h, pad_w = self.pad['d'], self.pad['h'], self.pad['w']
-        new_tensor = self.tensor[:, :, (pad_d // 2):(32 - pad_d // 2), (pad_h // 2):(32 - pad_h // 2),
-                     (pad_w // 2):(32 - pad_w // 2)]
+        new_tensor = self.tensor[:, (pad_d // 2):(32 - (pad_d // 2 if pad_d % 2 == 0 else pad_d // 2 + 1)),
+                     (pad_h // 2):(32 - (pad_h // 2 if pad_h % 2 == 0 else pad_h // 2 + 1)),
+                     (pad_w // 2):(32 - (pad_w // 2 if pad_w % 2 == 0 else pad_w // 2 + 1))]
+        new_tensor = new_tensor.unsqueeze(0)
         new_tensor = F.interpolate(new_tensor, self.ori_shape)
+        new_tensor = new_tensor.squeeze()
         self.tensor = new_tensor
         return self.tensor
 
@@ -75,6 +79,7 @@ def make_coord(shape, ranges=None, flatten=True):
     if flatten:
         ret = ret.view(-1, ret.shape[-1])
     return ret
+
 
 # 获取外包立方体
 # 未使用旋转卡壳算法，因为只需要水平垂直方向上外包即可

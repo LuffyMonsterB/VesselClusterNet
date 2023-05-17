@@ -95,9 +95,17 @@ class VesselClusterNet(nn.Module):
                 b_patch_format_feas.append(torch.stack(format_fea_list))
             # shape: B Num_patch C D H W
             format_fea = torch.tensor(torch.stack(b_patch_format_feas))
-        fine_out = self.vit(format_fea)
+        vit_out = self.vit(format_fea)
+        fine_outs = []
+        for b in range(len(b_patch_reshaped_feas)):
+            reshaped_outs = []
+            for i,fea in enumerate(b_patch_reshaped_feas[b]):
+                fea.restore(updated_tensor = vit_out[b,i,:,:,:].unsqueeze(0))
+                reshaped_outs.append(fea.tensor)
+            fine_outs.append(reshaped_outs)
+
         # todo: reshape tensor
-        return coarse_seg, fine_out,b_bounding_boxs
+        return coarse_seg, fine_outs,b_bounding_boxs
 
 
 if __name__ == '__main__':
