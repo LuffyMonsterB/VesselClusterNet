@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 import numpy as np
+from monai.networks.layers.utils import get_act_layer, get_norm_layer
 
 
 class PatchEmbeddingBlock(nn.Module):
@@ -60,13 +61,21 @@ class ViT(nn.Module):
                               qkv_bias=False) for i in range(depth)]
         )
         self.norm = nn.LayerNorm(emb_dim)
+
         self.decode_blocks = nn.ModuleList(
-            [nn.ConvTranspose3d(in_channels=emb_dim // 2**i, out_channels=emb_dim // 2**(i + 1), kernel_size=2,stride=2)
-             for i in range(image_size // patch_size // 2 + 1)],
+            [nn.Sequential(
+                get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** i),
+                get_act_layer('prelu'),
+                nn.ConvTranspose3d(in_channels=emb_dim // 2 ** i, out_channels=emb_dim // 2 ** (i + 1), kernel_size=2,
+                                   stride=2)
+            ) for i in range(image_size // patch_size // 2 + 2)],
         )
         self.final_conv = nn.Sequential(
-            nn.Conv3d(emb_dim // 2 ** (image_size // patch_size // 2 + 1), 1, kernel_size=1)
+            get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** (image_size // patch_size // 2 + 2)),
+            get_act_layer('prelu'),
+            nn.Conv3d(emb_dim // 2 ** (image_size // patch_size // 2 + 2), 1, kernel_size=1)
         )
+
     def forward(self, x):
         num_patch = x.shape[1]
         patches = []

@@ -11,6 +11,7 @@ from utils import fea_to_binary, make_coord, min_bounding_box, ReshapedTensor3D
 import math
 import numpy as np
 
+
 class VesselClusterNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -22,8 +23,9 @@ class VesselClusterNet(nn.Module):
             out_channels=1,
             dropout_prob=0.1,
         )
-        self.img_format_size = (32,32,32)
+        self.img_format_size = (32, 32, 32)
         self.vit = ViT(image_size=32, patch_size=8, in_channels=16, emb_dim=64, depth=4, heads=8, mlp_dim=256)
+
     # def _make_vit_layers(self):
     #     vit_layers = nn.ModuleList()
     #     num_layers = 3
@@ -94,8 +96,8 @@ class VesselClusterNet(nn.Module):
             # shape: B Num_patch C D H W
             format_fea = torch.tensor(torch.stack(b_patch_format_feas))
         fine_out = self.vit(format_fea)
-
-        return coarse_seg,fine_out
+        # todo: reshape tensor
+        return coarse_seg, fine_out,b_bounding_boxs
 
 
 if __name__ == '__main__':
