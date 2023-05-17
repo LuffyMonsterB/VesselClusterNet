@@ -45,6 +45,7 @@ class ReshapedTensor3D:
         self.tensor = new_tensor
         return self.tensor
 
+# 特征二值化
 def fea_to_binary(fea_list):
     threshold = 0.5
     map_list = []
