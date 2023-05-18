@@ -21,7 +21,7 @@ from monai.networks.layers.utils import get_act_layer, get_norm_layer
 from monai.utils import UpsampleMode
 
 
-class SegResNet3D(nn.Module):
+class SegResNet(nn.Module):
     """
     SegResNet based on `3D MRI brain tumor segmentation using autoencoder regularization
     <https://arxiv.org/pdf/1810.11654.pdf>`_.
@@ -90,6 +90,7 @@ class SegResNet3D(nn.Module):
         self.convInit = get_conv_layer(spatial_dims, in_channels, init_filters)
         self.down_layers = self._make_down_layers()
         self.up_layers, self.up_samples = self._make_up_layers()
+        self.map_layer = self._make_map_layers(out_channels)
         self.conv_final = self._make_final_conv(out_channels)
 
         if dropout_prob is not None:
@@ -148,6 +149,27 @@ class SegResNet3D(nn.Module):
             get_conv_layer(self.spatial_dims, self.init_filters, out_channels, kernel_size=1, bias=True),
         )
 
+    def _make_map_layers(self, out_channels: int):
+        map_layers = nn.ModuleList()
+        blocks_up, spatial_dims, filters, norm, act_mod = (
+            self.blocks_up,
+            self.spatial_dims,
+            self.init_filters,
+            self.norm,
+            self.act_mod
+        )
+        n_up = len(blocks_up)
+        for i in range(n_up):
+            sample_in_channels = filters * 2 ** (n_up - i - 1)
+            map_layers.append(
+                nn.Sequential(
+                    get_norm_layer(name=norm, spatial_dims=spatial_dims, channels=sample_in_channels),
+                    act_mod,
+                    get_conv_layer(spatial_dims, sample_in_channels, out_channels, kernel_size=1, bias=True),
+                )
+            )
+        return map_layers
+
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         x = self.convInit(x)
         if self.dropout_prob is not None:
@@ -162,25 +184,35 @@ class SegResNet3D(nn.Module):
         return x, down_x
 
     def decode(self, x: torch.Tensor, down_x: List[torch.Tensor]) -> torch.Tensor:
+        up_x = []
         for i, (up, upl) in enumerate(zip(self.up_samples, self.up_layers)):
             x = up(x) + down_x[i + 1]
             x = upl(x)
+            up_x.append(x)
 
         if self.use_conv_final:
             x = self.conv_final(x)
 
-        return x
+        return x, up_x
+
+    def map_to_output(self, x):
+        map_x = []
+        for i, map in enumerate(self.map_layer):
+            output_x = map(x[i])
+            map_x.append(output_x)
+        return map_x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, down_x = self.encode(x)
         down_x.reverse()
 
-        x = self.decode(x, down_x)
-        return x
+        x, up_x = self.decode(x, down_x)
+        up_outputs = self.map_to_output(up_x)
+        return {"output": x, "down_fea": down_x, "up_outputs": up_outputs}
 
 
 if __name__ == '__main__':
-    model = SegResNet3D(
+    seg_res_net = SegResNet(
         blocks_down=[1, 2, 2, 4],
         blocks_up=[1, 1, 1],
         init_filters=16,
@@ -188,9 +220,6 @@ if __name__ == '__main__':
         out_channels=1,
         dropout_prob=0.1,
     )
-    model.load_state_dict(torch.load(
-        '/Users/luffy/Documents/Projects/PycharmProjects/Paper2-VesselClusterNet/checkpoints/segresnet/epoch-190_dice-0.8242.pth',
-        map_location='cpu')['state_dict'])
     data = torch.randn(1, 1, 96, 96, 96)
-    output = model(data)
-    print(output)
+    output = seg_res_net(data)['output']
+    print(output.shape)
