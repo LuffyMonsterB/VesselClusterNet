@@ -100,6 +100,7 @@ class VesselClusterNet(nn.Module):
         format_fea = torch.stack(b_patch_format_feas).clone().detach()
         vit_out = self.vit(format_fea)
         fine_outs = []
+
         for b in range(len(b_patch_reshaped_feas)):
             reshaped_outs = []
             for i,fea in enumerate(b_patch_reshaped_feas[b]):
