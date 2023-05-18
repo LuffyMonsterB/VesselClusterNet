@@ -19,7 +19,10 @@ class ReshapedTensor3D:
         ori_d, ori_h, ori_w = self.ori_shape
         # 1. 根据最长边进行缩放
         scale = min(d / ori_d, h / ori_h, w / ori_w)
-        new_tensor = F.interpolate(self.tensor, scale_factor=scale)
+        new_d = int(ori_d*scale) if int(ori_d*scale)!=0 else 1
+        new_h = int(ori_h*scale) if int(ori_h*scale)!=0 else 1
+        new_w = int(ori_w*scale) if int(ori_w*scale)!=0 else 1
+        new_tensor = F.interpolate(self.tensor.unsqueeze(0),(new_d,new_h,new_w))
         self.scale = scale
         # 2. 对剩余边进行pad填充
         pad_d = (d - new_tensor.shape[-3] % d) if d != new_tensor.shape[-3] else 0
@@ -30,7 +33,7 @@ class ReshapedTensor3D:
         new_tensor = F.pad(new_tensor, (pad_w // 2, (pad_w // 2 if pad_w % 2 == 0 else pad_w // 2 + 1),
                                         pad_h // 2, (pad_h // 2 if pad_h % 2 == 0 else pad_h // 2 + 1),
                                         pad_d // 2, (pad_d // 2 if pad_d % 2 == 0 else pad_d // 2 + 1)))
-
+        new_tensor = new_tensor.squeeze()
         self.tensor = new_tensor
         self.new_shape = new_shape
         self.pad = {"d": pad_d, "h": pad_h, "w": pad_w}
@@ -57,7 +60,7 @@ def fea_to_binary(fea_list):
     threshold = 0.5
     map_list = []
     for fea in fea_list:
-        map_output = F.sigmoid(fea)
+        map_output = torch.sigmoid(fea)
         binary_output = torch.zeros_like(map_output)
         binary_output[map_output > threshold] = 1
         map_list.append(binary_output)

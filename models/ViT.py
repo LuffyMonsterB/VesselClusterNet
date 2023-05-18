@@ -58,8 +58,8 @@ class ViT(nn.Module):
                                                          patch_size=patch_size, emb_dim=emb_dim, num_heads=heads,
                                                          dropout_rate=dropout)
         self.blocks = nn.ModuleList(
-            [TransformerBlock(hidden_size=emb_dim, mlp_dim=mlp_dim, num_heads=heads, dropout_rate=dropout,
-                              qkv_bias=False) for i in range(depth)]
+            [TransformerBlock(hidden_size=emb_dim, mlp_dim=mlp_dim, num_heads=heads, dropout_rate=dropout
+                              ) for i in range(depth)]
         )
         self.norm = nn.LayerNorm(emb_dim)
 
@@ -70,13 +70,13 @@ class ViT(nn.Module):
                 nn.ConvTranspose3d(in_channels=emb_dim // 2 ** i * self.num_cluster,
                                    out_channels=emb_dim // 2 ** (i + 1) * self.num_cluster, kernel_size=2,
                                    stride=2)
-            ) for i in range(image_size // patch_size // 2 + 1)],
+            ) for i in range(patch_size // 2)],
         )
         self.final_conv = nn.Sequential(
             get_norm_layer('instance', spatial_dims=3,
-                           channels=emb_dim // 2 ** (image_size // patch_size // 2 + 1) * self.num_cluster),
+                           channels=emb_dim // 2 ** ( patch_size // 2) * self.num_cluster),
             get_act_layer('prelu'),
-            nn.Conv3d(emb_dim // 2 ** (image_size // patch_size // 2 + 1) * self.num_cluster, 1 * self.num_cluster,
+            nn.Conv3d(emb_dim // 2 ** ( patch_size // 2) * self.num_cluster, 1 * self.num_cluster,
                       kernel_size=1)
         )
 

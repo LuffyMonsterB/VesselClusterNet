@@ -54,14 +54,14 @@ def get_train_dataloader(data_dir, batch_size, num_workers):
     train_trans = transforms.Compose([
         transforms.LoadImageD(keys=['image', 'label']),
         transforms.EnsureChannelFirstD(keys=['image', 'label']),
-        transforms.RandSpatialCropD(keys=['image', 'label'], roi_size=(256, 256, 128), random_size=False),
+        transforms.RandSpatialCropD(keys=['image', 'label'], roi_size=(128, 128, 64), random_size=False),
         transforms.ScaleIntensityRangeD(keys=['image'], a_min=-968, a_max=512, b_min=0, b_max=1),
         transforms.EnsureTypeD(keys=['image', 'label'])
     ])
 
     train_ds = Parse22NiiDataset(train_niis, train_labels, train_trans)
 
-    train_dl = DataLoader(train_ds, batch_size=train_batchsize, num_workers=train_numworkers, shuffle=True,
+    train_dl = DataLoader(train_ds, batch_size=batch_size, num_workers=num_workers, shuffle=True,
                           pin_memory=torch.cuda.is_available())
     return train_dl
 
