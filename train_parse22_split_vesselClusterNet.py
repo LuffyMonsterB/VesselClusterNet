@@ -22,9 +22,9 @@ def main():
     logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     checkpoint_dir = './checkpoints/split_vessel_cluster_net'
     # 加载dataloader
-    train_dir = '../Data/Parse22/nii/train'
-    patch_size = 4
-    train_dl = get_train_dataloader(data_dir=train_dir, batch_size=1, num_workers=0,patch_size=patch_size,num_cluster=20)
+    train_dir = '../data/Parse22/train'
+    patch_size = 8
+    train_dl = get_train_dataloader(data_dir=train_dir, batch_size=1, num_workers=0,patch_size=patch_size,num_cluster=30)
     # 定义loss函数和模型训练配置
     dice_loss = DiceCELoss(sigmoid=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -56,15 +56,16 @@ def train_epoch(epoch, model, dataloader, optimizer, loss_func, device):
     train_loop.set_description(f'Epoch {epoch + 1}')
     for idx, (nii_patches, label_patches) in train_loop:
         for patch_data in zip(nii_patches,label_patches):
+            for param in model.parameters():
+                param.grad = None
             nii_patch, label_patch = patch_data[0].to(device),patch_data[1].to(device)
+
             output = model(nii_patch)
             loss = loss_func(output,label_patch)
             loss.backward()
             optimizer.step()
             run_loss.update(loss.item(), n=1)
         train_loop.set_postfix(train_avg_loss=round(np.mean(run_loss.avg), 4))
-        for param in model.parameters():
-            param.grad = None
     return run_loss.avg
 
 def save_checkpoint(save_dir, model, epoch, optimizer=None, scheduler=None):

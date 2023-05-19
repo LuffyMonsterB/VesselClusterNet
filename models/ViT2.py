@@ -5,7 +5,7 @@ import torch.nn as nn
 from einops import rearrange
 import numpy as np
 from monai.networks.layers.utils import get_act_layer, get_norm_layer
-
+import torch.nn.functional as F
 
 class PatchEmbeddingBlock(nn.Module):
     def __init__(self, in_channels: int,
@@ -46,7 +46,7 @@ class PatchEmbeddingBlock(nn.Module):
 
 
 class ViT(nn.Module):
-    def __init__(self, patch_size=8,  in_channels=1, emb_dim=64, depth=8, heads=8,
+    def __init__(self, patch_size=4,  in_channels=1, emb_dim=64, depth=4, heads=8,
                  mlp_dim=256, dropout=0.1):
         super().__init__()
         self.patch_size = patch_size
@@ -59,20 +59,20 @@ class ViT(nn.Module):
         )
         self.norm = nn.LayerNorm(emb_dim)
 
-        self.decode_blocks = nn.ModuleList(
-            [nn.Sequential(
-                get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** i),
-                get_act_layer('prelu'),
-                nn.ConvTranspose3d(in_channels=emb_dim // 2 ** i,
-                                   out_channels=emb_dim // 2 ** (i + 1), kernel_size=2,
-                                   stride=2)
-            ) for i in range(patch_size // 2)],
-        )
+        # self.decode_blocks = nn.ModuleList(
+        #     [nn.Sequential(
+        #         get_norm_layer('instance', spatial_dims=3, channels=emb_dim // 2 ** i),
+        #         get_act_layer('prelu'),
+        #         nn.ConvTranspose3d(in_channels=emb_dim // 2 ** i,
+        #                            out_channels=emb_dim // 2 ** (i + 1), kernel_size=2,
+        #                            stride=2)
+        #     ) for i in range(patch_size // 2)],
+        # )
         self.final_conv = nn.Sequential(
             get_norm_layer('instance', spatial_dims=3,
-                           channels=emb_dim // 2 ** ( patch_size // 2)),
+                           channels=emb_dim),
             get_act_layer('prelu'),
-            nn.Conv3d(emb_dim // 2 ** ( patch_size // 2) , 1 ,
+            nn.Conv3d(emb_dim , 1 ,
                       kernel_size=1)
         )
 
@@ -85,13 +85,10 @@ class ViT(nn.Module):
             hidden_states_out.append(x)
         x = self.norm(x)
         # decoder
-        p_size = self.img_size // self.patch_size
-        d = h = w = int(np.cbrt(x.shape[1] // num_patch))
-        x = x.reshape(shape=(x.shape[0], num_patch * x.shape[-1], d, h, w))
-
-        for decode_block in self.decode_blocks:
-            x = decode_block(x)
+        x = x.transpose(-1,-2)
+        x = x.reshape(shape=(x.shape[0],-1, d // self.patch_size, h // self.patch_size , w // self.patch_size))
         x = self.final_conv(x)
         # X: [B Patch C]
         # return x, hidden_states_out
-        return x
+        output = F.interpolate(x, scale_factor=self.patch_size)
+        return output
